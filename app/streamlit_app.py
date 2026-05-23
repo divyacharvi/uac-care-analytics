@@ -21,40 +21,50 @@ st.set_page_config(
 st.title("System Capacity & Care Load Analytics Dashboard")
 
 st.markdown("""
-This dashboard analyzes healthcare and shelter system load
-for the Unaccompanied Alien Children (UAC) Program.
+Interactive analytics dashboard for monitoring
+Unaccompanied Alien Children (UAC) healthcare
+and shelter system load.
 """)
 
 # ======================================
 # LOAD DATA
 # ======================================
 
-df = pd.read_csv("data/HHS_Unaccompanied_Alien_Children_Program.csv")
+df = pd.read_csv(
+    "data/HHS_Unaccompanied_Alien_Children_Program.csv"
+)
 
 # ======================================
-# DATA CLEANING
+# SHOW COLUMN NAMES
 # ======================================
 
-# Convert Date column
+st.subheader("Dataset Columns")
+
+st.write(df.columns.tolist())
+
+# ======================================
+# CLEAN DATA
+# ======================================
+
+# Convert date
 df['Date'] = pd.to_datetime(df['Date'])
 
-# Clean numeric columns
-numeric_columns = [
-    'Children apprehended and placed in CBP custody',
-    'Children in CBP custody',
-    'Children transferred out of CBP custody',
-    'Children in HHS Care',
-    'Children discharged from HHS Care'
-]
+# Detect numeric columns automatically
+numeric_cols = df.columns.drop('Date')
 
-for col in numeric_columns:
+# Clean all numeric columns
+for col in numeric_cols:
+
     df[col] = (
         df[col]
         .astype(str)
         .str.replace(',', '')
     )
 
-    df[col] = pd.to_numeric(df[col], errors='coerce')
+    df[col] = pd.to_numeric(
+        df[col],
+        errors='coerce'
+    )
 
 # Remove missing values
 df = df.dropna()
@@ -63,14 +73,21 @@ df = df.dropna()
 # CREATE METRICS
 # ======================================
 
+# Use available columns dynamically
+cbp_col = 'Children in CBP custody'
+
+hhs_col = 'Children in HHS Care'
+
+transfer_col = 'Children transferred out of CBP custody'
+
+discharge_col = 'Children discharged from HHS Care'
+
 df['Total System Load'] = (
-    df['Children in CBP custody'] +
-    df['Children in HHS Care']
+    df[cbp_col] + df[hhs_col]
 )
 
 df['Net Intake'] = (
-    df['Children transferred out of CBP custody'] -
-    df['Children discharged from HHS Care']
+    df[transfer_col] - df[discharge_col]
 )
 
 # ======================================
@@ -89,7 +106,6 @@ end_date = st.sidebar.date_input(
     value=df['Date'].max()
 )
 
-# Filter dataset
 filtered_df = df[
     (df['Date'] >= pd.to_datetime(start_date)) &
     (df['Date'] <= pd.to_datetime(end_date))
@@ -99,9 +115,11 @@ filtered_df = df[
 # KPI CARDS
 # ======================================
 
-current_load = int(filtered_df['Total System Load'].iloc[-1])
+current_load = int(
+    filtered_df['Total System Load'].iloc[-1]
+)
 
-avg_net_intake = round(
+avg_net = round(
     filtered_df['Net Intake'].mean(),
     2
 )
@@ -121,7 +139,7 @@ with col1:
 with col2:
     st.metric(
         "Average Net Intake",
-        avg_net_intake
+        avg_net
     )
 
 with col3:
@@ -131,8 +149,7 @@ with col3:
     )
 
 # ======================================
-# CHART 1
-# TOTAL SYSTEM LOAD
+# TOTAL LOAD CHART
 # ======================================
 
 st.subheader("Total System Load Over Time")
@@ -140,8 +157,7 @@ st.subheader("Total System Load Over Time")
 fig1 = px.line(
     filtered_df,
     x='Date',
-    y='Total System Load',
-    title='Total System Load Trend'
+    y='Total System Load'
 )
 
 fig1.update_layout(
@@ -154,8 +170,7 @@ st.plotly_chart(
 )
 
 # ======================================
-# CHART 2
-# CBP vs HHS LOAD
+# CBP vs HHS
 # ======================================
 
 st.subheader("CBP vs HHS Care Load")
@@ -165,7 +180,7 @@ fig2 = go.Figure()
 fig2.add_trace(
     go.Scatter(
         x=filtered_df['Date'],
-        y=filtered_df['Children in CBP custody'],
+        y=filtered_df[cbp_col],
         mode='lines',
         name='CBP Custody'
     )
@@ -174,15 +189,14 @@ fig2.add_trace(
 fig2.add_trace(
     go.Scatter(
         x=filtered_df['Date'],
-        y=filtered_df['Children in HHS Care'],
+        y=filtered_df[hhs_col],
         mode='lines',
         name='HHS Care'
     )
 )
 
 fig2.update_layout(
-    template='plotly_dark',
-    title='CBP vs HHS Care Load'
+    template='plotly_dark'
 )
 
 st.plotly_chart(
@@ -191,8 +205,7 @@ st.plotly_chart(
 )
 
 # ======================================
-# CHART 3
-# NET INTAKE PRESSURE
+# NET INTAKE
 # ======================================
 
 st.subheader("Net Intake Pressure")
@@ -200,8 +213,7 @@ st.subheader("Net Intake Pressure")
 fig3 = px.bar(
     filtered_df,
     x='Date',
-    y='Net Intake',
-    title='Net Intake Pressure'
+    y='Net Intake'
 )
 
 fig3.update_layout(
@@ -214,7 +226,7 @@ st.plotly_chart(
 )
 
 # ======================================
-# FUTURE LOAD PREDICTION
+# FUTURE PREDICTION
 # ======================================
 
 st.header("Future System Load Prediction")
@@ -223,9 +235,6 @@ prediction_df = filtered_df[
     ['Date', 'Total System Load']
 ].copy()
 
-prediction_df = prediction_df.dropna()
-
-# Convert dates into numbers
 prediction_df['Days'] = np.arange(
     len(prediction_df)
 )
@@ -234,12 +243,10 @@ X = prediction_df[['Days']]
 
 y = prediction_df['Total System Load']
 
-# Train Linear Regression model
 model = LinearRegression()
 
 model.fit(X, y)
 
-# Future predictions
 future_days = np.arange(
     len(prediction_df) + 90
 )
@@ -248,16 +255,13 @@ future_predictions = model.predict(
     future_days.reshape(-1, 1)
 )
 
-# Future dates
 future_dates = pd.date_range(
     start=prediction_df['Date'].min(),
     periods=len(future_days)
 )
 
-# Prediction chart
 forecast_fig = go.Figure()
 
-# Actual values
 forecast_fig.add_trace(
     go.Scatter(
         x=prediction_df['Date'],
@@ -267,7 +271,6 @@ forecast_fig.add_trace(
     )
 )
 
-# Predicted values
 forecast_fig.add_trace(
     go.Scatter(
         x=future_dates,
@@ -278,10 +281,8 @@ forecast_fig.add_trace(
 )
 
 forecast_fig.update_layout(
-    title='90-Day Future System Load Prediction',
-    xaxis_title='Date',
-    yaxis_title='Predicted Load',
-    template='plotly_dark'
+    template='plotly_dark',
+    title='90-Day Future Prediction'
 )
 
 st.plotly_chart(
@@ -290,22 +291,11 @@ st.plotly_chart(
 )
 
 # ======================================
-# PREDICTION TABLE
-# ======================================
-
-st.subheader("Prediction Data")
-
-prediction_table = pd.DataFrame({
-    'Date': future_dates[-20:],
-    'Predicted Load': future_predictions[-20:]
-})
-
-st.dataframe(prediction_table)
-
-# ======================================
-# DATA PREVIEW
+# DATA TABLE
 # ======================================
 
 st.subheader("Dataset Preview")
 
-st.dataframe(filtered_df.head(20))
+st.dataframe(
+    filtered_df.head(20)
+)
