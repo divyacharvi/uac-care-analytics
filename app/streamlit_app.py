@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from prophet import Prophet
+from sklearn.linear_model import LinearRegression
+import numpy as np
 
 # ======================================
 # PAGE CONFIG
@@ -20,8 +21,8 @@ st.set_page_config(
 st.title("System Capacity & Care Load Analytics Dashboard")
 
 st.markdown("""
-This dashboard analyzes healthcare and shelter system load for the
-Unaccompanied Alien Children (UAC) Program.
+This dashboard analyzes healthcare and shelter system load
+for the Unaccompanied Alien Children (UAC) Program.
 """)
 
 # ======================================
@@ -39,10 +40,11 @@ df['Date'] = pd.to_datetime(df['Date'])
 
 # Clean numeric columns
 numeric_columns = [
+    'Children apprehended and placed in CBP custody',
+    'Children in CBP custody',
+    'Children transferred out of CBP custody',
     'Children in HHS Care',
-    'New Intakes',
-    'Discharges',
-    'Total System Load'
+    'Children discharged from HHS Care'
 ]
 
 for col in numeric_columns:
@@ -50,13 +52,26 @@ for col in numeric_columns:
         df[col]
         .astype(str)
         .str.replace(',', '')
-        .replace('nan', None)
     )
 
     df[col] = pd.to_numeric(df[col], errors='coerce')
 
 # Remove missing values
 df = df.dropna()
+
+# ======================================
+# CREATE METRICS
+# ======================================
+
+df['Total System Load'] = (
+    df['Children in CBP custody'] +
+    df['Children in HHS Care']
+)
+
+df['Net Intake'] = (
+    df['Children transferred out of CBP custody'] -
+    df['Children discharged from HHS Care']
+)
 
 # ======================================
 # SIDEBAR FILTERS
@@ -74,168 +89,221 @@ end_date = st.sidebar.date_input(
     value=df['Date'].max()
 )
 
-# Filter dataframe
+# Filter dataset
 filtered_df = df[
     (df['Date'] >= pd.to_datetime(start_date)) &
     (df['Date'] <= pd.to_datetime(end_date))
 ]
 
 # ======================================
-# KPI METRICS
+# KPI CARDS
 # ======================================
 
 current_load = int(filtered_df['Total System Load'].iloc[-1])
 
-avg_intake = round(filtered_df['New Intakes'].mean(), 2)
+avg_net_intake = round(
+    filtered_df['Net Intake'].mean(),
+    2
+)
 
-peak_load = int(filtered_df['Total System Load'].max())
+peak_load = int(
+    filtered_df['Total System Load'].max()
+)
 
-# Display KPIs
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.metric(
-        label="Current Total Load",
-        value=current_load
+        "Current Total Load",
+        current_load
     )
 
 with col2:
     st.metric(
-        label="Average Net Intake",
-        value=avg_intake
+        "Average Net Intake",
+        avg_net_intake
     )
 
 with col3:
     st.metric(
-        label="Peak System Load",
-        value=peak_load
+        "Peak System Load",
+        peak_load
     )
 
 # ======================================
-# SYSTEM LOAD GRAPH
+# CHART 1
+# TOTAL SYSTEM LOAD
 # ======================================
 
 st.subheader("Total System Load Over Time")
 
-fig = px.line(
+fig1 = px.line(
     filtered_df,
     x='Date',
     y='Total System Load',
     title='Total System Load Trend'
 )
 
-fig.update_layout(
-    template="plotly_dark",
-    xaxis_title="Date",
-    yaxis_title="Total System Load"
+fig1.update_layout(
+    template='plotly_dark'
 )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(
+    fig1,
+    use_container_width=True
+)
 
 # ======================================
-# INTAKES VS DISCHARGES
+# CHART 2
+# CBP vs HHS LOAD
 # ======================================
 
-st.subheader("New Intakes vs Discharges")
+st.subheader("CBP vs HHS Care Load")
 
 fig2 = go.Figure()
 
 fig2.add_trace(
     go.Scatter(
         x=filtered_df['Date'],
-        y=filtered_df['New Intakes'],
+        y=filtered_df['Children in CBP custody'],
         mode='lines',
-        name='New Intakes'
+        name='CBP Custody'
     )
 )
 
 fig2.add_trace(
     go.Scatter(
         x=filtered_df['Date'],
-        y=filtered_df['Discharges'],
+        y=filtered_df['Children in HHS Care'],
         mode='lines',
-        name='Discharges'
+        name='HHS Care'
     )
 )
 
 fig2.update_layout(
-    template="plotly_dark",
-    title="Intakes vs Discharges",
-    xaxis_title="Date",
-    yaxis_title="Count"
+    template='plotly_dark',
+    title='CBP vs HHS Care Load'
 )
 
-st.plotly_chart(fig2, use_container_width=True)
+st.plotly_chart(
+    fig2,
+    use_container_width=True
+)
 
 # ======================================
-# FORECASTING SECTION
+# CHART 3
+# NET INTAKE PRESSURE
+# ======================================
+
+st.subheader("Net Intake Pressure")
+
+fig3 = px.bar(
+    filtered_df,
+    x='Date',
+    y='Net Intake',
+    title='Net Intake Pressure'
+)
+
+fig3.update_layout(
+    template='plotly_dark'
+)
+
+st.plotly_chart(
+    fig3,
+    use_container_width=True
+)
+
+# ======================================
+# FUTURE LOAD PREDICTION
 # ======================================
 
 st.header("Future System Load Prediction")
 
-# Prepare forecasting data
-forecast_df = filtered_df[['Date', 'Total System Load']].copy()
+prediction_df = filtered_df[
+    ['Date', 'Total System Load']
+].copy()
 
-forecast_df.columns = ['ds', 'y']
+prediction_df = prediction_df.dropna()
 
-forecast_df = forecast_df.dropna()
+# Convert dates into numbers
+prediction_df['Days'] = np.arange(
+    len(prediction_df)
+)
 
-# Prophet model
-model = Prophet()
+X = prediction_df[['Days']]
 
-model.fit(forecast_df)
+y = prediction_df['Total System Load']
 
-# Future prediction
-future = model.make_future_dataframe(periods=90)
+# Train Linear Regression model
+model = LinearRegression()
 
-forecast = model.predict(future)
+model.fit(X, y)
 
-# Forecast graph
+# Future predictions
+future_days = np.arange(
+    len(prediction_df) + 90
+)
+
+future_predictions = model.predict(
+    future_days.reshape(-1, 1)
+)
+
+# Future dates
+future_dates = pd.date_range(
+    start=prediction_df['Date'].min(),
+    periods=len(future_days)
+)
+
+# Prediction chart
 forecast_fig = go.Figure()
 
-# Actual
+# Actual values
 forecast_fig.add_trace(
     go.Scatter(
-        x=forecast_df['ds'],
-        y=forecast_df['y'],
+        x=prediction_df['Date'],
+        y=prediction_df['Total System Load'],
         mode='lines',
         name='Actual Load'
     )
 )
 
-# Prediction
+# Predicted values
 forecast_fig.add_trace(
     go.Scatter(
-        x=forecast['ds'],
-        y=forecast['yhat'],
+        x=future_dates,
+        y=future_predictions,
         mode='lines',
         name='Predicted Load'
     )
 )
 
 forecast_fig.update_layout(
-    template="plotly_dark",
-    title="90-Day Future System Load Forecast",
-    xaxis_title="Date",
-    yaxis_title="Predicted Load"
+    title='90-Day Future System Load Prediction',
+    xaxis_title='Date',
+    yaxis_title='Predicted Load',
+    template='plotly_dark'
 )
 
-st.plotly_chart(forecast_fig, use_container_width=True)
+st.plotly_chart(
+    forecast_fig,
+    use_container_width=True
+)
 
 # ======================================
-# FORECAST TABLE
+# PREDICTION TABLE
 # ======================================
 
-st.subheader("Forecast Data")
+st.subheader("Prediction Data")
 
-forecast_table = forecast[['ds', 'yhat']].tail(20)
+prediction_table = pd.DataFrame({
+    'Date': future_dates[-20:],
+    'Predicted Load': future_predictions[-20:]
+})
 
-forecast_table.columns = ['Date', 'Predicted Load']
-
-st.dataframe(forecast_table)
+st.dataframe(prediction_table)
 
 # ======================================
-# RAW DATA
+# DATA PREVIEW
 # ======================================
 
 st.subheader("Dataset Preview")
